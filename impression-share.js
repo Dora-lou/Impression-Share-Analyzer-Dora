@@ -48,7 +48,7 @@ let enriched = [];
 let lastExportRows = [];
 let analysisReady = false;
 
-const TABLE_PAGE_SIZE = 100;
+const TABLE_PAGE_SIZE = 25;
 const tablePages = { market: 1, quadrant: 1 };
 
 function debounce(fn, waitMs) {
