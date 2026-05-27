@@ -46,6 +46,15 @@ let trends = []; // per (date, term, country)
 let summary = []; // per term latest + first
 let enriched = [];
 let lastExportRows = [];
+let analysisReady = false;
+
+function debounce(fn, waitMs) {
+  let timer = null;
+  return (...args) => {
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), waitMs);
+  };
+}
 
 function stripHeader(s) {
   return String(s ?? "").trim();
@@ -236,15 +245,8 @@ function sortRowsByNumber(rows, field, direction) {
   });
 }
 
-function analyze() {
-  if (!rawRows.length) {
-    setStatus("请先上传 CSV 或点击样例数据。", "error");
-    return;
-  }
-
-  const shareHigh = Number($("shareHigh").value || 30);
-  const rankGood = Number($("rankGood").value || 3);
-  const acosGood = Number($("acosGood").value || 30);
+function computeBaseFromRaw() {
+  if (!rawRows.length) return false;
 
   // Normalize headers + robust matching across variants
   const headers = Object.keys(rawRows[0] || {}).map(stripHeader);
@@ -270,7 +272,8 @@ function analyze() {
       `缺少关键列：${missing.join("、")}。请确认你上传的是 Search Term Impression Share 报告。`,
       "error"
     );
-    return;
+    analysisReady = false;
+    return false;
   }
 
   const hasCountry = !!countryCol;
@@ -348,8 +351,15 @@ function analyze() {
     });
   }
   summary.sort((a, b) => (b.latest_share ?? -1) - (a.latest_share ?? -1));
+  analysisReady = true;
+  return true;
+}
 
-  // Enrich
+function applyThresholdsToSummary() {
+  const shareHigh = Number($("shareHigh").value || 30);
+  const rankGood = Number($("rankGood").value || 3);
+  const acosGood = Number($("acosGood").value || 30);
+
   enriched = summary.map((r) => {
     const market =
       r.latest_impressions == null ? null : estimateMarketImpressions(r.latest_impressions, r.latest_share);
@@ -365,18 +375,20 @@ function analyze() {
       strategy: buildStrategy(q, r.latest_acos, acosGood, market),
     };
   });
+}
 
-  // KPIs
-  const dates = trends.map((t) => t.dateStr).sort();
-  const meta = {
+function renderResults() {
+  if (!analysisReady || !enriched.length) return;
+
+  const byTerm = new Set(enriched.map((r) => r.search_term));
+  const dates = [...new Set(trends.map((t) => t.dateStr))].sort();
+  renderKpis({
     terms: byTerm.size,
-    days: new Set(dates).size,
+    days: dates.length,
     points: trends.length,
     dateRange: dates.length ? `${dates[0]} → ${dates[dates.length - 1]}` : "—",
-  };
-  renderKpis(meta);
+  });
 
-  // Render tables with filters
   const search = ($("search").value || "").trim();
   const marketMatchMode = $("marketMatchMode")?.value || "phrase";
   const minDays = Number($("minDays").value || 1);
@@ -432,43 +444,90 @@ function analyze() {
 
   setStatus(`分析完成：${marketFiltered.length} 个搜索词（展示前 500）。`, "ok");
 
-  // Populate term picker based on latest analysis
   populateTermPicker();
   renderSelectedTermTrend();
 }
 
-function loadCsvText(text, label = "CSV") {
-  setStatus(`正在解析：${label} ...`);
-  Papa.parse(text, {
-    header: true,
-    skipEmptyLines: true,
-    complete: (res) => {
-      rawRows = res.data || [];
-      setStatus(`已加载：${label}（行数：${rawRows.length.toLocaleString()}）`, "ok");
-    },
-    error: (err) => setStatus(`解析失败：${err}`, "error"),
-  });
+function analyze() {
+  if (!rawRows.length) {
+    setStatus("请先上传文件或点击样例数据。", "error");
+    return;
+  }
+
+  setStatus(`正在分析 ${rawRows.length.toLocaleString()} 行数据，请稍候…`);
+  window.setTimeout(() => {
+    if (!computeBaseFromRaw()) return;
+    applyThresholdsToSummary();
+    renderResults();
+  }, 0);
 }
 
-function loadTsvOrTxt(text, label = "TXT") {
-  // Try TSV first, fallback to CSV
-  setStatus(`正在解析：${label} ...`);
-  const tryParse = (delimiter) =>
-    new Promise((resolve, reject) => {
+function refreshViews() {
+  if (!analysisReady) return;
+  applyThresholdsToSummary();
+  renderResults();
+}
+
+const refreshViewsDebounced = debounce(refreshViews, 250);
+
+function formatFileSize(bytes) {
+  if (!bytes) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function finishLoad(rows, label) {
+  rawRows = rows || [];
+  analysisReady = false;
+  enriched = [];
+  trends = [];
+  summary = [];
+  $("btnExport").disabled = true;
+  setStatus(
+    `已加载：${label}（${rawRows.length.toLocaleString()} 行），请点击「分析」`,
+    "ok"
+  );
+}
+
+/** Parse CSV/TXT from File (no Web Worker — worker often never completes on GitHub Pages). */
+function loadDelimitedFile(file, delimiter) {
+  const sizeHint = formatFileSize(file.size);
+  setStatus(`正在解析 ${file.name}（${sizeHint}）…`);
+
+  const config = {
+    header: true,
+    skipEmptyLines: true,
+    worker: false,
+    complete: (res) => finishLoad(res.data, file.name),
+    error: (err) => setStatus(`解析失败：${err?.message || err}`, "error"),
+  };
+  if (delimiter) config.delimiter = delimiter;
+
+  setTimeout(() => {
+    try {
+      Papa.parse(file, config);
+    } catch (err) {
+      setStatus(`解析失败：${err?.message || err}`, "error");
+    }
+  }, 0);
+}
+
+function loadCsvText(text, label = "CSV") {
+  setStatus(`正在解析：${label} …`);
+  setTimeout(() => {
+    try {
       Papa.parse(text, {
         header: true,
         skipEmptyLines: true,
-        delimiter,
-        complete: (res) => resolve(res),
-        error: (err) => reject(err),
+        worker: false,
+        complete: (res) => finishLoad(res.data, label),
+        error: (err) => setStatus(`解析失败：${err?.message || err}`, "error"),
       });
-    });
-  tryParse("\t")
-    .then((res) => {
-      rawRows = res.data || [];
-      setStatus(`已加载：${label}（行数：${rawRows.length.toLocaleString()}）`, "ok");
-    })
-    .catch(() => loadCsvText(text, label));
+    } catch (err) {
+      setStatus(`解析失败：${err?.message || err}`, "error");
+    }
+  }, 0);
 }
 
 async function loadXlsx(file) {
@@ -476,18 +535,24 @@ async function loadXlsx(file) {
     setStatus("缺少 XLSX 解析库（vendor/xlsx.full.min.js）。", "error");
     return;
   }
-  setStatus(`正在解析：${file.name} ...`);
-  const buf = await file.arrayBuffer();
-  const wb = window.XLSX.read(buf, { type: "array" });
-  const sheetName = wb.SheetNames?.[0];
-  if (!sheetName) {
-    setStatus("Excel 没有工作表。", "error");
-    return;
+  setStatus(`正在读取 Excel：${file.name}（${formatFileSize(file.size)}）…`);
+  await new Promise((r) => setTimeout(r, 0));
+  try {
+    const buf = await file.arrayBuffer();
+    setStatus(`正在解析 Excel 工作表…`);
+    await new Promise((r) => setTimeout(r, 0));
+    const wb = window.XLSX.read(buf, { type: "array" });
+    const sheetName = wb.SheetNames?.[0];
+    if (!sheetName) {
+      setStatus("Excel 没有工作表。", "error");
+      return;
+    }
+    const ws = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+    finishLoad(rows, `${file.name}#${sheetName}`);
+  } catch (err) {
+    setStatus(`Excel 解析失败：${err?.message || err}`, "error");
   }
-  const ws = wb.Sheets[sheetName];
-  // Convert to CSV text, then reuse the same CSV parsing pipeline
-  const csv = window.XLSX.utils.sheet_to_csv(ws);
-  loadCsvText(csv, `${file.name}#${sheetName}`);
 }
 
 async function loadSample() {
@@ -879,29 +944,31 @@ function init() {
       await loadXlsx(f);
       return;
     }
-    const text = await f.text();
     if (name.endsWith(".txt")) {
-      loadTsvOrTxt(text, f.name);
+      loadDelimitedFile(f, "\t");
       return;
     }
-    loadCsvText(text, f.name);
+    loadDelimitedFile(f);
   });
 
   $("btnLoadSample").addEventListener("click", loadSample);
   $("btnAnalyze").addEventListener("click", analyze);
   $("btnExport").addEventListener("click", exportCsv);
 
-  // Re-render on filters
-  $("search").addEventListener("input", () => rawRows.length && analyze());
-  $("marketMatchMode")?.addEventListener("change", () => rawRows.length && analyze());
-  $("minDays").addEventListener("change", () => rawRows.length && analyze());
-  $("marketSortField")?.addEventListener("change", () => rawRows.length && analyze());
-  $("marketSortDir")?.addEventListener("change", () => rawRows.length && analyze());
-  $("quadSearch")?.addEventListener("input", () => rawRows.length && analyze());
-  $("quadMatchMode")?.addEventListener("change", () => rawRows.length && analyze());
-  $("quadFilter").addEventListener("change", () => rawRows.length && analyze());
-  $("quadSortField")?.addEventListener("change", () => rawRows.length && analyze());
-  $("quadSortDir")?.addEventListener("change", () => rawRows.length && analyze());
+  // Filters only re-render tables (do not re-parse the whole file)
+  $("search").addEventListener("input", refreshViewsDebounced);
+  $("marketMatchMode")?.addEventListener("change", refreshViews);
+  $("minDays").addEventListener("change", refreshViews);
+  $("marketSortField")?.addEventListener("change", refreshViews);
+  $("marketSortDir")?.addEventListener("change", refreshViews);
+  $("quadSearch")?.addEventListener("input", refreshViewsDebounced);
+  $("quadMatchMode")?.addEventListener("change", refreshViews);
+  $("quadFilter").addEventListener("change", refreshViews);
+  $("quadSortField")?.addEventListener("change", refreshViews);
+  $("quadSortDir")?.addEventListener("change", refreshViews);
+  $("shareHigh")?.addEventListener("change", refreshViews);
+  $("rankGood")?.addEventListener("change", refreshViews);
+  $("acosGood")?.addEventListener("change", refreshViews);
 
   $("termQuery")?.addEventListener("input", () => {
     if (!rawRows.length) return;
