@@ -1,0 +1,22 @@
+__pycache__/
+*.py[cod]
+.DS_Store
+
+# Python virtual envs
+.venv/
+venv/
+ENV/
+
+# Streamlit
+.streamlit/
+run.log
+
+# Local data
+data/*.csv
+data/*.xlsx
+data/*.parquet
+
+# Keep the demo dataset tracked
+!data/sample_report.csv
+!data/.gitkeep
+

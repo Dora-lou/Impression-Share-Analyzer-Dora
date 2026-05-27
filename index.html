@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Amazon Impression Share Analyzer-Dora</title>
+    <link rel="stylesheet" href="./impression-share.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <div>
+          <h1>Amazon Impression Share Analyzer-Dora</h1>
+          <p class="sub">
+            离线版：上传 CSV → 自动聚合 → 市场曝光反推 → 四象限策略
+          </p>
+        </div>
+        <div class="badge">No Python · No pip · Offline</div>
+      </header>
+
+      <section class="card">
+        <h2>1) 上传你的报告文件</h2>
+        <p class="muted">
+          支持 Amazon Sponsored Products <b>Search Term Impression Share</b> 报告。
+          本页所有计算都在本地浏览器完成，不上传云端。
+        </p>
+        <div class="row">
+          <input id="file" type="file" accept=".csv,.txt,.xlsx,.xls" />
+          <button id="btnLoadSample" class="btn secondary" type="button">
+            用样例数据试跑
+          </button>
+          <span id="status" class="status"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>2) 阈值设置</h2>
+        <div class="grid3">
+          <label class="field">
+            <span>高份额下限 (%)</span>
+            <input id="shareHigh" type="number" min="0" max="100" step="0.1" value="30" />
+          </label>
+          <label class="field">
+            <span>高排名上限 (Rank ≤)</span>
+            <input id="rankGood" type="number" min="1" max="50" step="1" value="3" />
+          </label>
+          <label class="field">
+            <span>ACOS 健康线 (%)</span>
+            <input id="acosGood" type="number" min="0" max="200" step="0.1" value="30" />
+          </label>
+        </div>
+        <div class="row">
+          <button id="btnAnalyze" class="btn primary" type="button">分析</button>
+          <button id="btnExport" class="btn secondary" type="button" disabled>
+            导出结果 CSV
+          </button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>结果</h2>
+        <div class="tabs">
+          <button class="tab active" data-tab="market">市场曝光</button>
+          <button class="tab" data-tab="quadrant">四象限策略</button>
+          <button class="tab" data-tab="term">单词趋势</button>
+        </div>
+
+        <div id="tab-market" class="tabPanel">
+          <p class="muted">
+            公式：<b>市场总曝光 = 你的曝光 ÷ (Share% ÷ 100)</b>（你的曝光会跨广告组累加）
+          </p>
+          <div class="row">
+            <input id="search" class="input" placeholder="搜索词过滤（包含匹配）" />
+            <select id="marketMatchMode" class="input" style="min-width:160px">
+              <option value="phrase" selected>词组匹配</option>
+              <option value="exact">精准匹配</option>
+            </select>
+            <label class="field inline">
+              <span>最少天数</span>
+              <input id="minDays" type="number" min="1" step="1" value="2" />
+            </label>
+            <label class="field inline">
+              <span>排序字段</span>
+              <select id="marketSortField" class="input" style="min-width:160px">
+                <option value="market_impressions" selected>市场总曝光</option>
+                <option value="latest_impressions">你的曝光</option>
+              </select>
+            </label>
+            <label class="field inline">
+              <span>排序方式</span>
+              <select id="marketSortDir" class="input" style="min-width:120px">
+                <option value="desc" selected>从大到小</option>
+                <option value="asc">从小到大</option>
+              </select>
+            </label>
+          </div>
+          <div id="kpis" class="kpis"></div>
+          <div id="tableMarket" class="tableWrap"></div>
+        </div>
+
+        <div id="tab-quadrant" class="tabPanel hidden">
+          <div class="row">
+            <input id="quadSearch" class="input" placeholder="搜索词过滤" />
+            <select id="quadMatchMode" class="input" style="min-width:160px">
+              <option value="phrase" selected>词组匹配</option>
+              <option value="exact">精准匹配</option>
+            </select>
+            <select id="quadFilter" class="input">
+              <option value="">全部象限</option>
+              <option value="① 高份额 + 高排名">① 高份额 + 高排名</option>
+              <option value="② 高份额 + 低排名">② 高份额 + 低排名</option>
+              <option value="③ 低份额 + 高排名">③ 低份额 + 高排名</option>
+              <option value="④ 低份额 + 低排名">④ 低份额 + 低排名</option>
+            </select>
+            <select id="quadSortField" class="input" style="min-width:160px">
+              <option value="market_impressions" selected>市场总曝光</option>
+              <option value="latest_impressions">你的曝光</option>
+            </select>
+            <select id="quadSortDir" class="input" style="min-width:120px">
+              <option value="desc" selected>从大到小</option>
+              <option value="asc">从小到大</option>
+            </select>
+          </div>
+          <div id="tableQuadrant" class="tableWrap"></div>
+        </div>
+
+        <div id="tab-term" class="tabPanel hidden">
+          <p class="muted">
+            选择一个搜索词，查看不同日期的 Share / Rank 波动（含逐日变化）。
+          </p>
+          <div class="row">
+            <input id="termQuery" class="input" placeholder="搜索词过滤（包含匹配）" />
+            <select id="termMatchMode" class="input" style="min-width:160px">
+              <option value="broad" selected>广泛匹配</option>
+              <option value="exact">精准匹配</option>
+            </select>
+            <select id="termPick" class="input" size="12"></select>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <label class="check"><input id="showShare" type="checkbox" checked /> 显示 Share</label>
+            <label class="check"><input id="showRank" type="checkbox" checked /> 显示 Rank</label>
+            <label class="check"><input id="showMarket" type="checkbox" checked /> 显示市场总曝光</label>
+          </div>
+          <div class="chartCard">
+            <canvas id="termChart" width="980" height="360"></canvas>
+            <div class="muted" style="font-size:12px;margin-top:6px">
+              说明：Share 用左轴（%）；Rank 用右轴（数值越小越好，已做反向刻度）。
+            </div>
+          </div>
+          <div class="chartCard">
+            <canvas id="marketChart" width="980" height="320"></canvas>
+            <div class="muted" style="font-size:12px;margin-top:6px">
+              市场总曝光 = 你的曝光 ÷ (Share% ÷ 100)。若文件缺少 Impressions 列，则无法绘制。
+            </div>
+          </div>
+          <div id="termKpis" class="kpis"></div>
+          <div id="tableTerm" class="tableWrap"></div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <span class="muted">
+          如果你后续要放 GitHub：上传本项目代码即可（不包含你的真实报表）。
+        </span>
+      </footer>
+    </div>
+
+    <script src="./vendor/papaparse.min.js"></script>
+    <script src="./vendor/xlsx.full.min.js"></script>
+    <script src="./impression-share.js"></script>
+  </body>
+</html>
+
