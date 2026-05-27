@@ -48,6 +48,9 @@ let enriched = [];
 let lastExportRows = [];
 let analysisReady = false;
 
+const TABLE_PAGE_SIZE = 100;
+const tablePages = { market: 1, quadrant: 1 };
+
 function debounce(fn, waitMs) {
   let timer = null;
   return (...args) => {
@@ -223,6 +226,48 @@ function renderTable(containerId, rows, columns) {
     })
     .join("");
   wrap.innerHTML = `<table>${thead}<tbody>${tbody}</tbody></table>`;
+}
+
+function renderPager(pagerId, pageKey, page, totalPages, total, start, pageSize) {
+  const el = $(pagerId);
+  if (!el) return;
+  if (!total) {
+    el.innerHTML = "";
+    return;
+  }
+  const from = start + 1;
+  const to = Math.min(start + pageSize, total);
+  const inputId = pageKey === "market" ? "marketPageInput" : "quadPageInput";
+  el.innerHTML = `
+    <span class="pagerInfo">共 ${total.toLocaleString()} 条 · 本页 ${from.toLocaleString()}–${to.toLocaleString()}</span>
+    <button type="button" class="btn secondary btnPager" data-pager-key="${pageKey}" data-pager-action="first" data-total-pages="${totalPages}" ${page <= 1 ? "disabled" : ""}>首页</button>
+    <button type="button" class="btn secondary btnPager" data-pager-key="${pageKey}" data-pager-action="prev" data-total-pages="${totalPages}" ${page <= 1 ? "disabled" : ""}>上一页</button>
+    <span class="pagerInfo">第 ${page} / ${totalPages} 页</span>
+    <button type="button" class="btn secondary btnPager" data-pager-key="${pageKey}" data-pager-action="next" data-total-pages="${totalPages}" ${page >= totalPages ? "disabled" : ""}>下一页</button>
+    <button type="button" class="btn secondary btnPager" data-pager-key="${pageKey}" data-pager-action="last" data-total-pages="${totalPages}" ${page >= totalPages ? "disabled" : ""}>末页</button>
+    <label class="field inline pagerJump">
+      <span>跳至</span>
+      <input id="${inputId}" class="input pagerInput" type="number" min="1" max="${totalPages}" value="${page}" />
+      <button type="button" class="btn secondary btnPager" data-pager-key="${pageKey}" data-pager-action="goto" data-total-pages="${totalPages}">跳转</button>
+    </label>
+  `;
+}
+
+function renderPaginatedTable(tableId, pagerId, rows, columns, pageKey) {
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / TABLE_PAGE_SIZE));
+  let page = tablePages[pageKey] || 1;
+  if (page > totalPages) {
+    page = totalPages;
+    tablePages[pageKey] = page;
+  }
+  if (page < 1) {
+    page = 1;
+    tablePages[pageKey] = page;
+  }
+  const start = (page - 1) * TABLE_PAGE_SIZE;
+  renderTable(tableId, rows.slice(start, start + TABLE_PAGE_SIZE), columns);
+  renderPager(pagerId, pageKey, page, totalPages, total, start, TABLE_PAGE_SIZE);
 }
 
 function matchesSearchTerm(term, query, mode) {
@@ -405,7 +450,7 @@ function renderResults() {
   lastExportRows = sortedMarket;
   $("btnExport").disabled = sortedMarket.length === 0;
 
-  renderTable("tableMarket", sortedMarket.slice(0, 500), [
+  const marketColumns = [
     { key: "search_term", label: "搜索词" },
     { key: "latest_date", label: "最新日期" },
     { key: "latest_impressions", label: "你的曝光", render: (v) => (v == null ? "—" : Math.round(v).toLocaleString()) },
@@ -417,7 +462,8 @@ function renderResults() {
     { key: "share_change", label: "Share 变化", render: (v) => (v == null ? "—" : (v >= 0 ? "+" : "") + v.toFixed(2)) },
     { key: "rank_change", label: "Rank 变化", render: (v) => (v == null ? "—" : (v >= 0 ? "+" : "") + Math.round(v)) },
     { key: "observations", label: "天数" },
-  ]);
+  ];
+  renderPaginatedTable("tableMarket", "marketPager", sortedMarket, marketColumns, "market");
 
   const qFilter = $("quadFilter").value;
   const qSearch = ($("quadSearch")?.value || "").trim();
@@ -431,7 +477,7 @@ function renderResults() {
   });
   const qSorted = sortRowsByNumber(qFiltered, qSortField, qSortDir);
 
-  renderTable("tableQuadrant", qSorted.slice(0, 500), [
+  const quadColumns = [
     { key: "search_term", label: "搜索词" },
     { key: "latest_impressions", label: "你的曝光", render: (v) => (v == null ? "—" : Math.round(v).toLocaleString()) },
     { key: "market_impressions", label: "市场总曝光", render: (v) => (v == null ? "—" : Math.round(v).toLocaleString()) },
@@ -440,9 +486,13 @@ function renderResults() {
     { key: "latest_acos", label: "ACOS %", render: (v) => (v == null ? "—" : v.toFixed(2)) },
     { key: "quadrant_label", label: "象限", render: (v) => (v ? pill(v) : "—") },
     { key: "strategy", label: "策略建议", render: (v) => (v ? String(v) : "—") },
-  ]);
+  ];
+  renderPaginatedTable("tableQuadrant", "quadPager", qSorted, quadColumns, "quadrant");
 
-  setStatus(`分析完成：${marketFiltered.length} 个搜索词（展示前 500）。`, "ok");
+  setStatus(
+    `分析完成：市场曝光 ${marketFiltered.length.toLocaleString()} 条 · 四象限 ${qFiltered.length.toLocaleString()} 条（已全部解析，表格分页浏览）`,
+    "ok"
+  );
 
   populateTermPicker();
   renderSelectedTermTrend();
@@ -458,6 +508,8 @@ function analyze() {
   window.setTimeout(() => {
     if (!computeBaseFromRaw()) return;
     applyThresholdsToSummary();
+    tablePages.market = 1;
+    tablePages.quadrant = 1;
     renderResults();
   }, 0);
 }
@@ -465,6 +517,31 @@ function analyze() {
 function refreshViews() {
   if (!analysisReady) return;
   applyThresholdsToSummary();
+  tablePages.market = 1;
+  tablePages.quadrant = 1;
+  renderResults();
+}
+
+function handlePagerClick(e) {
+  const btn = e.target.closest("[data-pager-action]");
+  if (!btn || !analysisReady) return;
+  const key = btn.dataset.pagerKey;
+  if (key !== "market" && key !== "quadrant") return;
+  const action = btn.dataset.pagerAction;
+  const totalPages = Math.max(1, Number(btn.dataset.totalPages) || 1);
+  let page = tablePages[key] || 1;
+
+  if (action === "first") page = 1;
+  else if (action === "prev") page = Math.max(1, page - 1);
+  else if (action === "next") page = Math.min(totalPages, page + 1);
+  else if (action === "last") page = totalPages;
+  else if (action === "goto") {
+    const inputId = key === "market" ? "marketPageInput" : "quadPageInput";
+    const raw = Number($(inputId)?.value);
+    page = Number.isFinite(raw) ? Math.min(totalPages, Math.max(1, Math.floor(raw))) : page;
+  } else return;
+
+  tablePages[key] = page;
   renderResults();
 }
 
@@ -475,6 +552,29 @@ function formatFileSize(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function ensureParseLibs(forExcel = false) {
+  if (typeof Papa === "undefined") {
+    setStatus(
+      "CSV 解析库未加载。若用 GitHub Pages，请推送 vendor 文件夹或刷新页面（将自动从 CDN 加载）。",
+      "error"
+    );
+    return false;
+  }
+  if (forExcel && !window.XLSX) {
+    setStatus("Excel 解析库未加载（vendor/xlsx.full.min.js）。", "error");
+    return false;
+  }
+  return true;
+}
+
+function formatParseError(err) {
+  const msg = err?.message || String(err || "");
+  if (/Papa is not defined/i.test(msg) || typeof Papa === "undefined") {
+    return "CSV 解析库未加载（GitHub 上缺少 vendor/papaparse.min.js）";
+  }
+  return msg || "未知错误";
 }
 
 function finishLoad(rows, label) {
@@ -492,6 +592,8 @@ function finishLoad(rows, label) {
 
 /** Parse CSV/TXT from File (no Web Worker — worker often never completes on GitHub Pages). */
 function loadDelimitedFile(file, delimiter) {
+  if (!ensureParseLibs()) return;
+
   const sizeHint = formatFileSize(file.size);
   setStatus(`正在解析 ${file.name}（${sizeHint}）…`);
 
@@ -500,7 +602,7 @@ function loadDelimitedFile(file, delimiter) {
     skipEmptyLines: true,
     worker: false,
     complete: (res) => finishLoad(res.data, file.name),
-    error: (err) => setStatus(`解析失败：${err?.message || err}`, "error"),
+    error: (err) => setStatus(`解析失败：${formatParseError(err)}`, "error"),
   };
   if (delimiter) config.delimiter = delimiter;
 
@@ -508,12 +610,14 @@ function loadDelimitedFile(file, delimiter) {
     try {
       Papa.parse(file, config);
     } catch (err) {
-      setStatus(`解析失败：${err?.message || err}`, "error");
+      setStatus(`解析失败：${formatParseError(err)}`, "error");
     }
   }, 0);
 }
 
 function loadCsvText(text, label = "CSV") {
+  if (!ensureParseLibs()) return;
+
   setStatus(`正在解析：${label} …`);
   setTimeout(() => {
     try {
@@ -522,19 +626,16 @@ function loadCsvText(text, label = "CSV") {
         skipEmptyLines: true,
         worker: false,
         complete: (res) => finishLoad(res.data, label),
-        error: (err) => setStatus(`解析失败：${err?.message || err}`, "error"),
+        error: (err) => setStatus(`解析失败：${formatParseError(err)}`, "error"),
       });
     } catch (err) {
-      setStatus(`解析失败：${err?.message || err}`, "error");
+      setStatus(`解析失败：${formatParseError(err)}`, "error");
     }
   }, 0);
 }
 
 async function loadXlsx(file) {
-  if (!window.XLSX) {
-    setStatus("缺少 XLSX 解析库（vendor/xlsx.full.min.js）。", "error");
-    return;
-  }
+  if (!ensureParseLibs(true)) return;
   setStatus(`正在读取 Excel：${file.name}（${formatFileSize(file.size)}）…`);
   await new Promise((r) => setTimeout(r, 0));
   try {
@@ -954,6 +1055,7 @@ function init() {
   $("btnLoadSample").addEventListener("click", loadSample);
   $("btnAnalyze").addEventListener("click", analyze);
   $("btnExport").addEventListener("click", exportCsv);
+  document.addEventListener("click", handlePagerClick);
 
   // Filters only re-render tables (do not re-parse the whole file)
   $("search").addEventListener("input", refreshViewsDebounced);

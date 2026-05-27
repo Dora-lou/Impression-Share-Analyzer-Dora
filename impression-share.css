@@ -52,6 +52,10 @@ select.input option{background:#ffffff;color:var(--text)}
 .kpi .label{color:var(--muted);font-size:12px}
 .kpi .value{font-size:16px;font-weight:800;margin-top:6px}
 .tableWrap{overflow:auto;border:1px solid var(--line);border-radius:12px;background:#ffffff}
+.pager{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0 4px}
+.pagerInfo{color:var(--muted);font-size:13px}
+.pagerJump .pagerInput{min-width:72px;width:72px;padding:6px 8px}
+.btnPager{padding:7px 10px;font-size:13px}
 table{width:100%;border-collapse:collapse;min-width:860px}
 th,td{padding:9px 10px;border-bottom:1px solid #e2e8f0;text-align:left;font-size:13px;vertical-align:top}
 th{position:sticky;top:0;background:#f8fafc;z-index:1}

@@ -96,6 +96,7 @@
           </div>
           <div id="kpis" class="kpis"></div>
           <div id="tableMarket" class="tableWrap"></div>
+          <div id="marketPager" class="pager"></div>
         </div>
 
         <div id="tab-quadrant" class="tabPanel hidden">
@@ -122,6 +123,7 @@
             </select>
           </div>
           <div id="tableQuadrant" class="tableWrap"></div>
+          <div id="quadPager" class="pager"></div>
         </div>
 
         <div id="tab-term" class="tabPanel hidden">
@@ -160,9 +162,55 @@
 
     </div>
 
-    <script src="./vendor/papaparse.min.js"></script>
-    <script src="./vendor/xlsx.full.min.js"></script>
-    <script src="./impression-share.js?v=2"></script>
+    <script>
+      (function () {
+        function loadScript(src, fallback) {
+          return new Promise(function (resolve, reject) {
+            var el = document.createElement("script");
+            el.src = src;
+            el.onload = resolve;
+            el.onerror = function () {
+              if (!fallback) {
+                reject(new Error(src));
+                return;
+              }
+              var fb = document.createElement("script");
+              fb.src = fallback;
+              fb.onload = resolve;
+              fb.onerror = function () {
+                reject(new Error(src + " | " + fallback));
+              };
+              document.head.appendChild(fb);
+            };
+            document.head.appendChild(el);
+          });
+        }
+
+        var PAPA_CDN =
+          "https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js";
+        var XLSX_CDN =
+          "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js";
+
+        Promise.all([
+          loadScript("./vendor/papaparse.min.js", PAPA_CDN),
+          loadScript("./vendor/xlsx.full.min.js", XLSX_CDN),
+        ])
+          .then(function () {
+            var app = document.createElement("script");
+            app.src = "./impression-share.js?v=4";
+            document.body.appendChild(app);
+          })
+          .catch(function (err) {
+            var status = document.getElementById("status");
+            if (status) {
+              status.textContent =
+                "依赖库加载失败（vendor 未上传且 CDN 不可用）。请把 vendor 文件夹推送到 GitHub 后重试。";
+              status.className = "status error";
+            }
+            console.error(err);
+          });
+      })();
+    </script>
   </body>
 </html>
 
